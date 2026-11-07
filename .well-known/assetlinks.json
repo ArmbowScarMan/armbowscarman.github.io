@@ -1,1 +1,11 @@
-[{"relation":["delegate_permission/common.handle_all_urls"],"target":{"namespace":"android_app","package_name":"se.roothood.app","sha256_cert_fingerprints":["E7:62:CB:E0:F2:6B:6B:10:C4:9C:2D:91:05:C5:74:22:17:33:34:34:F5:EE:67:29:73:F7:EB:EB:BE:5A:75:41"]}}]
+[{
+      "relation": ["delegate_permission/common.handle_all_urls"],
+      "target": {
+        "namespace": "android_app",
+        "package_name": "se.roothood.app",
+        "sha256_cert_fingerprints": [
+          "E7:62:CB:E0:F2:6B:6B:10:C4:9C:2D:91:05:C5:74:22:17:33:34:34:F5:EE:67:29:73:F7:EB:EB:BE:5A:75:41",
+          "50:9B:EF:C0:6D:DB:B8:32:7A:FF:1A:53:7B:14:A0:D3:9F:FE:03:A6:E7:D8:99:EC:B3:E7:D2:16:AB:B6:15:60"
+        ]
+      }
+    }]
