@@ -1,0 +1,453 @@
+<!doctype html>
+<html lang="sv">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#2f6f4f">
+<title>Stämpla – digitala stämpelkort</title>
+<style>
+  :root { --accent:#2f6f4f; --bg:#f6f5f1; --card:#fff; --text:#1f2a24; --muted:#66716a; --line:#e3e1da; --bad:#b3261e; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; background:var(--bg); color:var(--text); line-height:1.45; }
+  #app { max-width:560px; margin:0 auto; padding:16px 16px 48px; }
+  h1 { font-size:1.5rem; margin:8px 0 4px; }
+  h2 { font-size:1.15rem; margin:0 0 10px; }
+  p { margin:0 0 12px; }
+  .muted { color:var(--muted); font-size:.92rem; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:16px; padding:18px; margin:14px 0; }
+  label { display:block; font-weight:600; margin:12px 0 4px; font-size:.95rem; }
+  input, select { width:100%; padding:13px 12px; font-size:1rem; border:1px solid #cfcdc5; border-radius:12px; background:#fff; color:var(--text); }
+  input[type=color] { padding:2px; height:48px; }
+  button { font:inherit; font-weight:600; padding:13px 18px; border-radius:12px; border:0; background:var(--accent); color:#fff; cursor:pointer; width:100%; margin-top:12px; }
+  button.secondary { background:#e9e7e0; color:var(--text); }
+  button.small { width:auto; padding:8px 14px; margin:0; font-size:.9rem; white-space:nowrap; flex-shrink:0; }
+  button:disabled { opacity:.55; cursor:default; }
+  .tabs { display:flex; gap:6px; margin:12px 0; }
+  .tabs button { margin:0; background:#e9e7e0; color:var(--text); padding:10px 6px; font-size:.92rem; }
+  .tabs button.on { background:var(--accent); color:#fff; }
+  .row { display:flex; justify-content:space-between; align-items:center; gap:10px; }
+  .msg { padding:12px 14px; border-radius:12px; margin:12px 0; font-weight:600; }
+  .msg.ok { background:#e3f3e9; color:#17543a; }
+  .msg.warn { background:#fff3d6; color:#6b4a00; }
+  .msg.bad { background:#fde7e5; color:var(--bad); }
+  .banner { background:#fff3d6; color:#6b4a00; border-radius:12px; padding:10px 14px; font-size:.92rem; margin:10px 0; }
+  .stamps { display:grid; grid-template-columns:repeat(5,1fr); gap:10px; margin:16px 0; }
+  .stamp { aspect-ratio:1; border-radius:50%; border:2px dashed #c9c7bf; display:flex; align-items:center; justify-content:center; font-size:1.3rem; color:#fff; }
+  .stamp.on { background:var(--accent); border:2px solid var(--accent); }
+  .big { font-size:2rem; font-weight:800; letter-spacing:.12em; text-align:center; margin:8px 0; }
+  .qr { display:flex; justify-content:center; padding:8px; }
+  .qr svg { width:min(260px,70vw); height:auto; }
+  .biztitle { background:var(--accent); color:#fff; border-radius:16px; padding:18px; margin:6px 0 0; }
+  .biztitle h1 { margin:0; }
+  video { width:100%; border-radius:12px; background:#000; max-height:260px; object-fit:cover; }
+  .stats { display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px; }
+  .stat { text-align:center; background:#f3f1ea; border-radius:12px; padding:12px 4px; }
+  .stat b { display:block; font-size:1.6rem; }
+  .linkbox { word-break:break-all; background:#f3f1ea; border-radius:10px; padding:10px; font-size:.9rem; }
+  .hidden { display:none !important; }
+  #poster { display:none; }
+  @media print {
+    body { background:#fff; }
+    #app > *:not(#poster) { display:none !important; }
+    #poster { display:block !important; text-align:center; padding:40px 20px; }
+    #poster h1 { font-size:2.4rem; }
+    #poster .qr svg { width:380px; }
+  }
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.119.0/dist/umd/supabase.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js"></script>
+<script>
+const APP_VERSION = '0.1.0';
+// Publika uppgifter (publishable key är gjord för att ligga i webbläsarkoden – säkerheten ligger i databasens regler).
+const SUPABASE_URL = 'https://pmhoowwqihyuasbtcqej.supabase.co';
+const SUPABASE_KEY = 'sb_publishable_gvngRZbTZ7h6s4bAayAfTA_9c61uTKD';
+
+const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+const app = document.getElementById('app');
+
+/* ---------- små hjälpfunktioner ---------- */
+function h(tag, attrs, ...kids) {
+  const el = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) {
+    if (k === 'class') el.className = v;
+    else if (k.startsWith('on')) el.addEventListener(k.slice(2), v);
+    else if (v !== false && v != null) el.setAttribute(k, v);
+  }
+  for (const kid of kids.flat()) {
+    if (kid == null || kid === false) continue;
+    el.append(kid.nodeType ? kid : document.createTextNode(String(kid)));
+  }
+  return el;
+}
+function clear(el) { while (el.firstChild) el.removeChild(el.firstChild); }
+function qrSvg(text) {
+  const qr = qrcode(0, 'M');
+  qr.addData(text);
+  qr.make();
+  const wrap = h('div', { class: 'qr' });
+  wrap.innerHTML = qr.createSvgTag({ cellSize: 6, margin: 24, scalable: true });
+  return wrap;
+}
+function slugify(name) {
+  let s = name.toLowerCase().replace(/[åä]/g, 'a').replace(/ö/g, 'o').replace(/é/g, 'e')
+    .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 34);
+  if (s.length < 3) s = (s + '-kort').slice(0, 40);
+  return s;
+}
+function randSuffix() { return Math.random().toString(36).slice(2, 5); }
+function setAccent(color) {
+  if (/^#[0-9a-fA-F]{6}$/.test(color || '')) {
+    document.documentElement.style.setProperty('--accent', color);
+    const m = document.querySelector('meta[name=theme-color]'); if (m) m.content = color;
+  }
+}
+function customerLink(slug) {
+  return location.origin + location.pathname + '?k=' + encodeURIComponent(slug);
+}
+function niceError(e) {
+  const m = (e && e.message) || String(e);
+  if (/Invalid login/i.test(m)) return 'Fel mejl eller lösenord.';
+  if (/Email not confirmed/i.test(m)) return 'Bekräfta din mejl först – kolla inkorgen.';
+  if (/already registered/i.test(m)) return 'Det finns redan ett konto med den mejladressen.';
+  if (/Password should be/i.test(m)) return 'Lösenordet måste vara minst 6 tecken.';
+  if (/not_found/.test(m)) return 'Hittar inte det här kortet.';
+  if (/Failed to fetch|NetworkError/i.test(m)) return 'Ingen kontakt med servern. Kolla din uppkoppling.';
+  return 'Något gick fel: ' + m;
+}
+
+/* ---------- kundvy: ?k=<slug> ---------- */
+async function customerView(slug) {
+  clear(app);
+  const status = h('div');
+  app.append(status);
+  const { data: biz, error } = await sb.rpc('get_business_public', { p_slug: slug });
+  if (error || !biz || !biz.length) {
+    app.append(h('div', { class: 'card' }, h('h2', {}, 'Kortet hittades inte'),
+      h('p', { class: 'muted' }, 'Länken verkar vara fel. Fråga personalen efter en ny QR-kod.')));
+    return;
+  }
+  const b = biz[0];
+  setAccent(b.color);
+  const key = 'stampla_token_' + slug;
+  let token = null;
+  try { token = localStorage.getItem(key); } catch (e) {}
+
+  const holder = h('div');
+  app.append(h('div', { class: 'biztitle' }, h('h1', {}, b.name), h('div', {}, 'Stämpelkort')), holder);
+
+  async function join() {
+    const btn = holder.querySelector('button'); if (btn) btn.disabled = true;
+    const { data, error } = await sb.rpc('join_card', { p_slug: slug });
+    if (error || !data || !data.length) { status.replaceChildren(h('div', { class: 'msg bad' }, niceError(error))); if (btn) btn.disabled = false; return; }
+    token = data[0].out_token;
+    try { localStorage.setItem(key, token); } catch (e) {}
+    await show();
+  }
+  async function show() {
+    const { data, error } = await sb.rpc('get_my_card', { p_token: token });
+    if (error) { status.replaceChildren(h('div', { class: 'msg bad' }, niceError(error))); return; }
+    if (!data || !data.length) { // kortet finns inte längre – börja om
+      try { localStorage.removeItem(key); } catch (e) {}
+      token = null; return render();
+    }
+    status.replaceChildren();
+    const c = data[0];
+    const full = c.stamps >= c.stamps_required;
+    const grid = h('div', { class: 'stamps' });
+    for (let i = 0; i < c.stamps_required; i++) grid.append(h('div', { class: 'stamp' + (i < c.stamps ? ' on' : '') }, i < c.stamps ? '✓' : ''));
+    holder.replaceChildren(
+      h('div', { class: 'card' },
+        h('div', { class: 'row' }, h('b', {}, c.stamps + ' av ' + c.stamps_required + ' stämplar'), h('span', { class: 'muted' }, 'Belöning: ' + c.reward)),
+        grid,
+        full ? h('div', { class: 'msg ok' }, '🎉 Kortet är fullt! Visa det i kassan och få: ' + c.reward) : null,
+        c.rewards_redeemed > 0 ? h('p', { class: 'muted' }, 'Belöningar du fått hittills: ' + c.rewards_redeemed) : null),
+      h('div', { class: 'card' },
+        h('h2', {}, 'Visa den här koden i kassan'),
+        qrSvg(c.code),
+        h('div', { class: 'big' }, c.code),
+        h('p', { class: 'muted' }, 'Personalen skannar koden eller skriver in den. Spara sidan som bokmärke eller på hemskärmen så hittar du kortet igen.')));
+  }
+  function render() {
+    if (token) return show();
+    holder.replaceChildren(h('div', { class: 'card' },
+      h('h2', {}, 'Skaffa ditt stämpelkort'),
+      h('p', {}, 'Samla ' + b.stamps_required + ' stämplar och få: ' + b.reward + '.'),
+      h('p', { class: 'muted' }, 'Inga konton och inga personuppgifter – kortet sparas bara i den här webbläsaren.'),
+      h('button', { onclick: join }, 'Skaffa kort')));
+  }
+  render();
+  // uppdatera kortet när kunden kommer tillbaka till sidan, och var 10:e sekund medan den är öppen
+  document.addEventListener('visibilitychange', () => { if (!document.hidden && token) show(); });
+  setInterval(() => { if (!document.hidden && token) show(); }, 10000);
+}
+
+/* ---------- företagsvy ---------- */
+let session = null;
+
+async function ownerView() {
+  clear(app);
+  const { data: { session: s } } = await sb.auth.getSession();
+  session = s;
+  if (!session) return loginView();
+  const { data: biz, error } = await sb.from('businesses').select('*').limit(1);
+  if (error) { app.append(h('div', { class: 'msg bad' }, niceError(error))); return; }
+  if (!biz.length) return createBusinessView();
+  dashboard(biz[0]);
+}
+
+function loginView() {
+  clear(app);
+  let mode = 'login';
+  const msg = h('div');
+  const email = h('input', { type: 'email', autocomplete: 'email', placeholder: 'din@mejl.se' });
+  const pass = h('input', { type: 'password', autocomplete: 'current-password', placeholder: 'Minst 6 tecken' });
+  const go = h('button', {}, 'Logga in');
+  const toggle = h('button', { class: 'secondary' }, 'Skapa nytt konto');
+  function sync() {
+    go.textContent = mode === 'login' ? 'Logga in' : 'Skapa konto';
+    toggle.textContent = mode === 'login' ? 'Skapa nytt konto' : 'Jag har redan konto';
+    pass.autocomplete = mode === 'login' ? 'current-password' : 'new-password';
+  }
+  toggle.onclick = () => { mode = mode === 'login' ? 'signup' : 'login'; msg.replaceChildren(); sync(); };
+  go.onclick = async () => {
+    msg.replaceChildren();
+    if (!email.value.trim() || pass.value.length < 6) { msg.append(h('div', { class: 'msg warn' }, 'Fyll i mejl och ett lösenord på minst 6 tecken.')); return; }
+    go.disabled = true;
+    try {
+      if (mode === 'login') {
+        const { error } = await sb.auth.signInWithPassword({ email: email.value.trim(), password: pass.value });
+        if (error) throw error;
+        await ownerView();
+      } else {
+        const { data, error } = await sb.auth.signUp({ email: email.value.trim(), password: pass.value, options: { emailRedirectTo: location.origin + location.pathname } });
+        if (error) throw error;
+        if (data.session) await ownerView();
+        else msg.append(h('div', { class: 'msg ok' }, 'Konto skapat! Vi har skickat ett mejl – klicka på länken i det, och logga sedan in här.'));
+      }
+    } catch (e) { msg.append(h('div', { class: 'msg bad' }, niceError(e))); }
+    go.disabled = false;
+  };
+  app.append(
+    h('h1', {}, 'Stämpla'),
+    h('p', { class: 'muted' }, 'Digitala stämpelkort för din butik, ditt kafé eller din salong. Kunderna slipper papperskort – du slipper tappade stämplar.'),
+    h('div', { class: 'card' },
+      h('label', {}, 'Mejl'), email, h('label', {}, 'Lösenord'), pass, go, toggle, msg));
+}
+
+function createBusinessView() {
+  clear(app);
+  const msg = h('div');
+  const name = h('input', { type: 'text', maxlength: 80, placeholder: 'T.ex. Café Hörnan' });
+  const reward = h('input', { type: 'text', maxlength: 120, value: 'Gratis kaffe' });
+  const need = h('input', { type: 'number', min: 2, max: 30, value: 10 });
+  const color = h('input', { type: 'color', value: '#2f6f4f' });
+  const go = h('button', {}, 'Skapa mitt stämpelkort');
+  go.onclick = async () => {
+    msg.replaceChildren();
+    if (!name.value.trim()) { msg.append(h('div', { class: 'msg warn' }, 'Skriv ditt företagsnamn.')); return; }
+    go.disabled = true;
+    let slug = slugify(name.value);
+    for (let attempt = 0; attempt < 4; attempt++) {
+      const { error } = await sb.from('businesses').insert({
+        name: name.value.trim(), slug, reward: reward.value.trim() || 'Gratis kaffe',
+        stamps_required: Math.min(30, Math.max(2, parseInt(need.value, 10) || 10)), color: color.value });
+      if (!error) { await ownerView(); return; }
+      if (error.code === '23505' && /slug/.test(error.message + (error.details || ''))) { slug = slugify(name.value).slice(0, 36) + '-' + randSuffix(); continue; }
+      msg.append(h('div', { class: 'msg bad' }, niceError(error))); break;
+    }
+    go.disabled = false;
+  };
+  app.append(h('h1', {}, 'Skapa ditt stämpelkort'),
+    h('div', { class: 'card' },
+      h('label', {}, 'Företagets namn'), name,
+      h('label', {}, 'Belöning'), reward,
+      h('label', {}, 'Antal stämplar för belöning'), need,
+      h('label', {}, 'Färg på kortet'), color, go, msg));
+}
+
+function daysLeft(b) {
+  const end = Math.max(new Date(b.trial_ends_at).getTime(), b.paid_until ? new Date(b.paid_until).getTime() : 0);
+  return Math.ceil((end - Date.now()) / 86400000);
+}
+
+function dashboard(b) {
+  clear(app);
+  setAccent(b.color);
+  const content = h('div');
+  const tabs = h('div', { class: 'tabs' });
+  const names = { stamp: 'Stämpla', card: 'Mitt kort', stats: 'Statistik' };
+  function open(tab) {
+    for (const [k, btn] of Object.entries(tabButtons)) btn.className = k === tab ? 'on' : '';
+    stopScan();
+    clear(content);
+    if (tab === 'stamp') stampTab(content, b);
+    if (tab === 'card') cardTab(content, b);
+    if (tab === 'stats') statsTab(content, b);
+  }
+  const tabButtons = {};
+  for (const k of Object.keys(names)) { tabButtons[k] = h('button', { onclick: () => open(k) }, names[k]); tabs.append(tabButtons[k]); }
+  const dl = daysLeft(b);
+  const notice = dl <= 0 ? h('div', { class: 'msg bad' }, 'Din provperiod är slut – det går inte att stämpla längre. Kontakta oss för att fortsätta.')
+    : (dl <= 7 ? h('div', { class: 'banner' }, 'Provperioden går ut om ' + dl + ' dagar.') : null);
+  app.append(
+    h('div', { class: 'row' }, h('h1', {}, b.name),
+      h('button', { class: 'secondary small', onclick: async () => { await sb.auth.signOut(); loginView(); } }, 'Logga ut')),
+    ...(notice ? [notice] : []),
+    tabs, content,
+    posterEl(b));
+  open('stamp');
+}
+
+function posterEl(b) {
+  return h('div', { id: 'poster' }, h('h1', {}, b.name), h('h2', {}, 'Skanna och skaffa ditt stämpelkort!'),
+    qrSvg(customerLink(b.slug)), h('p', {}, 'Samla ' + b.stamps_required + ' stämplar och få: ' + b.reward));
+}
+
+/* --- stämpla --- */
+let scanStream = null, scanTimer = null;
+function stopScan() {
+  if (scanTimer) { clearInterval(scanTimer); scanTimer = null; }
+  if (scanStream) { scanStream.getTracks().forEach(t => t.stop()); scanStream = null; }
+}
+
+function stampTab(root, b) {
+  const result = h('div');
+  const code = h('input', { type: 'text', placeholder: 'T.ex. K7M2QX9A', autocapitalize: 'characters', autocomplete: 'off', maxlength: 12 });
+  const videoBox = h('div', { class: 'hidden' });
+  let busyUntil = 0;
+
+  async function doStamp(raw) {
+    const c = String(raw || '').trim().toUpperCase();
+    if (!c) return;
+    const { data, error } = await sb.rpc('add_stamp', { p_code: c });
+    result.replaceChildren();
+    if (error) { result.append(h('div', { class: 'msg bad' }, niceError(error))); return; }
+    const st = data.status;
+    if (st === 'ok') {
+      result.append(h('div', { class: 'msg ok' }, '✅ Stämpel tillagd: ' + data.stamps + ' av ' + data.required));
+      if (data.reward_ready) result.append(rewardBox(c, b.reward));
+      code.value = '';
+    } else if (st === 'full') {
+      result.append(h('div', { class: 'msg warn' }, 'Kortet är redan fullt (' + data.stamps + ' av ' + data.required + ').'), rewardBox(c, b.reward));
+    } else if (st === 'too_soon') {
+      result.append(h('div', { class: 'msg warn' }, 'Det här kortet stämplades alldeles nyss (' + data.stamps + ' av ' + data.required + '). Ingen ny stämpel lades till.'));
+    } else if (st === 'expired') {
+      result.append(h('div', { class: 'msg bad' }, 'Provperioden är slut – det går inte att stämpla längre.'));
+    } else {
+      result.append(h('div', { class: 'msg bad' }, 'Hittar inte kortet. Kolla koden – eller så hör kortet till en annan butik.'));
+    }
+  }
+  function rewardBox(c, rewardText) {
+    const btn = h('button', {}, 'Lös in belöning: ' + rewardText);
+    btn.onclick = async () => {
+      btn.disabled = true;
+      const { data, error } = await sb.rpc('redeem_reward', { p_code: c });
+      result.replaceChildren();
+      if (error || data.status !== 'ok') result.append(h('div', { class: 'msg bad' }, error ? niceError(error) : 'Kunde inte lösa in belöningen.'));
+      else result.append(h('div', { class: 'msg ok' }, '🎁 Belöning inlöst! Kortet har nu ' + data.stamps + ' stämplar.'));
+    };
+    return btn;
+  }
+
+  async function startScan() {
+    if (!('BarcodeDetector' in window) || !navigator.mediaDevices) {
+      result.replaceChildren(h('div', { class: 'msg warn' }, 'Den här webbläsaren kan inte skanna QR-koder. Skriv in koden istället.'));
+      return;
+    }
+    try {
+      scanStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+    } catch (e) {
+      result.replaceChildren(h('div', { class: 'msg warn' }, 'Kameran får inte användas. Tillåt kameran i webbläsaren, eller skriv in koden.'));
+      return;
+    }
+    const video = h('video', { playsinline: 'true', muted: 'true' });
+    video.srcObject = scanStream;
+    videoBox.className = ''; videoBox.replaceChildren(video, h('button', { class: 'secondary', onclick: () => { stopScan(); videoBox.className = 'hidden'; } }, 'Stäng kameran'));
+    await video.play();
+    const det = new BarcodeDetector({ formats: ['qr_code'] });
+    scanTimer = setInterval(async () => {
+      if (Date.now() < busyUntil || video.readyState < 2) return;
+      try {
+        const found = await det.detect(video);
+        if (found.length) { busyUntil = Date.now() + 3000; await doStamp(found[0].rawValue); }
+      } catch (e) {}
+    }, 300);
+  }
+
+  root.append(
+    h('div', { class: 'card' },
+      h('h2', {}, 'Stämpla ett kort'),
+      h('button', { onclick: startScan }, '📷 Skanna kundens QR-kod'),
+      videoBox,
+      h('label', {}, 'Eller skriv in kundens kod'), code,
+      h('button', { class: 'secondary', onclick: () => doStamp(code.value) }, 'Stämpla'),
+      result));
+}
+
+/* --- mitt kort --- */
+function cardTab(root, b) {
+  const link = customerLink(b.slug);
+  const msg = h('div');
+  const name = h('input', { type: 'text', maxlength: 80, value: b.name });
+  const reward = h('input', { type: 'text', maxlength: 120, value: b.reward });
+  const need = h('input', { type: 'number', min: 2, max: 30, value: b.stamps_required });
+  const color = h('input', { type: 'color', value: b.color });
+  const copy = h('button', { class: 'secondary' }, 'Kopiera länk');
+  copy.onclick = async () => { try { await navigator.clipboard.writeText(link); copy.textContent = 'Kopierad!'; } catch (e) { copy.textContent = 'Markera länken och kopiera'; } };
+  const save = h('button', {}, 'Spara ändringar');
+  save.onclick = async () => {
+    msg.replaceChildren(); save.disabled = true;
+    const upd = { name: name.value.trim() || b.name, reward: reward.value.trim() || b.reward,
+      stamps_required: Math.min(30, Math.max(2, parseInt(need.value, 10) || b.stamps_required)), color: color.value };
+    const { error } = await sb.from('businesses').update(upd).eq('id', b.id);
+    if (error) msg.append(h('div', { class: 'msg bad' }, niceError(error)));
+    else { Object.assign(b, upd); setAccent(b.color); msg.append(h('div', { class: 'msg ok' }, 'Sparat!')); }
+    save.disabled = false;
+  };
+  root.append(
+    h('div', { class: 'card' },
+      h('h2', {}, 'Kundernas QR-kod'),
+      h('p', { class: 'muted' }, 'Sätt upp den vid kassan. Kunden skannar den med sin mobil och får sitt kort direkt.'),
+      qrSvg(link), h('div', { class: 'linkbox' }, link), copy,
+      h('button', { onclick: () => window.print() }, '🖨 Skriv ut affisch')),
+    h('div', { class: 'card' },
+      h('h2', {}, 'Ändra kortet'),
+      h('label', {}, 'Företagets namn'), name,
+      h('label', {}, 'Belöning'), reward,
+      h('label', {}, 'Antal stämplar för belöning'), need,
+      h('label', {}, 'Färg'), color, save, msg));
+}
+
+/* --- statistik --- */
+async function statsTab(root, b) {
+  const box = h('div', { class: 'card' }, h('h2', {}, 'Statistik'), h('p', { class: 'muted' }, 'Laddar…'));
+  root.append(box);
+  const week = new Date(Date.now() - 7 * 86400000).toISOString();
+  const [cust, stamps, redeems] = await Promise.all([
+    sb.from('customers').select('id', { count: 'exact', head: true }),
+    sb.from('stamp_log').select('id', { count: 'exact', head: true }).eq('action', 'stamp').gte('created_at', week),
+    sb.from('stamp_log').select('id', { count: 'exact', head: true }).eq('action', 'redeem')]);
+  const err = cust.error || stamps.error || redeems.error;
+  clear(box);
+  box.append(h('h2', {}, 'Statistik'));
+  if (err) { box.append(h('div', { class: 'msg bad' }, niceError(err))); return; }
+  box.append(h('div', { class: 'stats' },
+    h('div', { class: 'stat' }, h('b', {}, cust.count ?? 0), 'kunder med kort'),
+    h('div', { class: 'stat' }, h('b', {}, stamps.count ?? 0), 'stämplar senaste 7 dagarna'),
+    h('div', { class: 'stat' }, h('b', {}, redeems.count ?? 0), 'belöningar inlösta')));
+  box.append(h('p', { class: 'muted', style: 'margin-top:12px' }, 'Version ' + APP_VERSION));
+}
+
+/* ---------- start ---------- */
+(async function start() {
+  const slug = new URLSearchParams(location.search).get('k');
+  if (slug) return customerView(slug.toLowerCase());
+  await ownerView();
+  sb.auth.onAuthStateChange((ev) => { if (ev === 'SIGNED_OUT') loginView(); });
+})();
+</script>
+</body>
+</html>
